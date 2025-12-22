@@ -1,5 +1,5 @@
 /**
- * Office Script — Customer Retention Fetcher (v5.0)
+ * Office Script — Customer Retention Fetcher (v2.0)
  * Returns retention as a number (0–100) + metadata, ideal for Power Automate.
  *
  * Supported sources (first match wins):
@@ -33,6 +33,7 @@ type CellValue = string | number | boolean;
  * Note: ExcelScript namespace is only available at runtime in Excel,
  * not during TypeScript compilation
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Workbook = any;
 
 // ========== CONFIGURATION ==========
@@ -136,20 +137,22 @@ function tryGetFromNamedRange(
   rangeName: string
 ): RetentionResult | null {
   try {
-    const namedItem = workbook.getNamedItem(rangeName);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const namedItem: any = workbook.getNamedItem(rangeName);
     
     // Check if named range exists
     if (!namedItem) {
       return null;
     }
 
-    const range = namedItem.getRange();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const range: any = namedItem.getRange();
     if (!range) {
       return null;
     }
 
-    const value = range.getValue();
-    const parsed = parseRetention(value);
+    const value: CellValue | null | undefined = range.getValue();
+    const parsed: RetentionResult = parseRetention(value);
 
     return {
       ...parsed,
@@ -179,14 +182,16 @@ function tryGetFromTable(
   metricMatch: string
 ): RetentionResult | null {
   try {
-    const table = workbook.getTable(tableName);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const table: any = workbook.getTable(tableName);
     
     // Check if table exists
     if (!table) {
       return null;
     }
 
-    const headerRange = table.getHeaderRowRange();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const headerRange: any = table.getHeaderRowRange();
     if (!headerRange) {
       return {
         retention: null,
@@ -196,7 +201,8 @@ function tryGetFromTable(
       };
     }
 
-    const headerValues = headerRange.getValues();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const headerValues: any[][] = headerRange.getValues();
     if (!headerValues || headerValues.length === 0) {
       return {
         retention: null,
@@ -206,11 +212,11 @@ function tryGetFromTable(
       };
     }
 
-    const headers = headerValues[0].map((h: any) => String(h ?? "").trim());
+    const headers: string[] = headerValues[0].map((h: unknown) => String(h ?? "").trim());
 
     // Find column indices
-    const metricIdx = headers.findIndex((h: string) => equalsLoose(h, metricCol));
-    const valueIdx = headers.findIndex((h: string) => equalsLoose(h, valueCol));
+    const metricIdx: number = headers.findIndex((h: string) => equalsLoose(h, metricCol));
+    const valueIdx: number = headers.findIndex((h: string) => equalsLoose(h, valueCol));
 
     if (metricIdx < 0 || valueIdx < 0) {
       return {
@@ -222,7 +228,8 @@ function tryGetFromTable(
     }
 
     // Get table body
-    const bodyRange = table.getDataBodyRange();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const bodyRange: any = table.getDataBodyRange();
     if (!bodyRange) {
       return {
         retention: null,
@@ -232,15 +239,16 @@ function tryGetFromTable(
       };
     }
 
-    const rows = bodyRange.getValues();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rows: any[][] = bodyRange.getValues();
     
     // Search for matching metric row
-    for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
-      const metricValue = String(rows[rowIndex][metricIdx] ?? "").trim();
+    for (let rowIndex: number = 0; rowIndex < rows.length; rowIndex++) {
+      const metricValue: string = String(rows[rowIndex][metricIdx] ?? "").trim();
       
       if (equalsLoose(metricValue, metricMatch)) {
-        const cellValue = rows[rowIndex][valueIdx];
-        const parsed = parseRetention(cellValue);
+        const cellValue: CellValue | null | undefined = rows[rowIndex][valueIdx];
+        const parsed: RetentionResult = parseRetention(cellValue);
         
         return {
           ...parsed,
@@ -276,19 +284,21 @@ function tryGetFromCell(
   address: string
 ): RetentionResult | null {
   try {
-    const worksheet = workbook.getWorksheet(sheetName);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const worksheet: any = workbook.getWorksheet(sheetName);
     
     if (!worksheet) {
       return null;
     }
 
-    const range = worksheet.getRange(address);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const range: any = worksheet.getRange(address);
     if (!range) {
       return null;
     }
 
-    const value = range.getValue();
-    const parsed = parseRetention(value);
+    const value: CellValue | null | undefined = range.getValue();
+    const parsed: RetentionResult = parseRetention(value);
 
     return {
       ...parsed,
@@ -330,14 +340,14 @@ function parseRetention(value: CellValue | null | undefined): RetentionResult {
 
   // Handle string values (e.g., "93%", "93", "0.93")
   if (typeof value === "string") {
-    const trimmed = value.trim();
+    const trimmed: string = value.trim();
     
     // Handle percentage strings
-    const cleaned = trimmed.endsWith("%") 
+    const cleaned: string = trimmed.endsWith("%") 
       ? trimmed.slice(0, -1).trim() 
       : trimmed;
 
-    const numericValue = Number(cleaned);
+    const numericValue: number = Number(cleaned);
 
     if (!Number.isFinite(numericValue)) {
       return {
@@ -388,12 +398,12 @@ function validateAndNormalize(
   }
 
   // Convert decimal to percentage (0.93 → 93)
-  const normalized = (numericValue > 0 && numericValue <= 1)
+  const normalized: number = (numericValue > 0 && numericValue <= 1)
     ? numericValue * 100
     : numericValue;
 
   // Round to nearest integer to handle floating-point precision
-  const rounded = Math.round(normalized);
+  const rounded: number = Math.round(normalized);
 
   // Validate range (0-100)
   if (rounded < 0 || rounded > 100) {
@@ -424,8 +434,8 @@ function finalize(
   result: RetentionResult
 ): RetentionResult {
   // Add ISO 8601 timestamp
-  const now = new Date();
-  const updatedAtLocal = now.toISOString();
+  const now: Date = new Date();
+  const updatedAtLocal: string = now.toISOString();
 
   const finalResult: RetentionResult = {
     ...result,
@@ -435,11 +445,14 @@ function finalize(
   // Optional logging to worksheet
   if (ENABLE_LOGGING && finalResult.retention !== null) {
     try {
-      const logSheet = workbook.getWorksheet(LOG_SHEET);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const logSheet: any = workbook.getWorksheet(LOG_SHEET);
       
       if (logSheet) {
-        const valueRange = logSheet.getRange(LOG_CELL_VALUE);
-        const timeRange = logSheet.getRange(LOG_CELL_TIME);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const valueRange: any = logSheet.getRange(LOG_CELL_VALUE);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const timeRange: any = logSheet.getRange(LOG_CELL_TIME);
         
         if (valueRange && timeRange) {
           valueRange.setValue(finalResult.retention);
