@@ -28,13 +28,12 @@ type RetentionResult = {
 /** Excel value type (compatible with Office Scripts) */
 type CellValue = string | number | boolean;
 
+/** Minimal ExcelScript type declarations for local compile-time only */
+declare namespace ExcelScript { interface Workbook {} }
+
 /**
- * Workbook type alias for Office Scripts
- * Note: ExcelScript namespace is only available at runtime in Excel,
- * not during TypeScript compilation
+ * Workbook type alias removed; using ExcelScript.Workbook in signatures
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Workbook = any;
 
 // ========== CONFIGURATION ==========
 /** Named range to check for retention value */
@@ -70,6 +69,15 @@ const LOG_CELL_VALUE = "D2" as const;
 /** Cell to log timestamp */
 const LOG_CELL_TIME = "D3" as const;
 
+// ========== DIAGNOSTICS CONFIG ==========
+/** Enable lightweight diagnostics (console logging) */
+const ENABLE_DIAGNOSTICS = true as const;
+/** Also write diagnostics to a sheet (optional) */
+const DIAG_WRITE_TO_SHEET = false as const;
+/** Diagnostics sheet and starting cell when writing */
+const DIAG_SHEET = "KPIs" as const;
+const DIAG_START_CELL = "E2" as const;
+
 // ========== MAIN FUNCTION ==========
 
 /**
@@ -79,7 +87,7 @@ const LOG_CELL_TIME = "D3" as const;
  * @param workbook - The Excel workbook object
  * @returns RetentionResult object with retention value and metadata
  */
-function main(workbook: Workbook): RetentionResult {
+export default function main(workbook: ExcelScript.Workbook): RetentionResult {
   // Validate workbook parameter
   if (!workbook) {
     return {
@@ -93,6 +101,10 @@ function main(workbook: Workbook): RetentionResult {
   // 1) Try named range
   const fromNamed = tryGetFromNamedRange(workbook, NAMED_RANGE);
   if (fromNamed) {
+    diag(workbook, [
+      `Named range '${NAMED_RANGE}' found`,
+      `Result: status=${fromNamed.status}, retention=${fromNamed.retention}`
+    ]);
     return finalize(workbook, fromNamed);
   }
 
@@ -105,12 +117,20 @@ function main(workbook: Workbook): RetentionResult {
     TABLE_METRIC_MATCH
   );
   if (fromTable) {
+    diag(workbook, [
+      `Table '${TABLE_NAME}' lookup matched '${TABLE_METRIC_MATCH}'`,
+      `Result: status=${fromTable.status}, retention=${fromTable.retention}`
+    ]);
     return finalize(workbook, fromTable);
   }
 
   // 3) Fallback cell
   const fromCell = tryGetFromCell(workbook, FALLBACK_SHEET, FALLBACK_CELL);
   if (fromCell) {
+    diag(workbook, [
+      `Fallback cell ${FALLBACK_SHEET}!${FALLBACK_CELL} used`,
+      `Result: status=${fromCell.status}, retention=${fromCell.retention}`
+    ]);
     return finalize(workbook, fromCell);
   }
 
@@ -133,12 +153,14 @@ function main(workbook: Workbook): RetentionResult {
  * @returns RetentionResult if found, null otherwise
  */
 function tryGetFromNamedRange(
-  workbook: Workbook,
+  workbook: ExcelScript.Workbook,
   rangeName: string
 ): RetentionResult | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const namedItem: any = workbook.getNamedItem(rangeName);
+    const wb: any = workbook as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const namedItem: any = wb.getNamedItem(rangeName);
     
     // Check if named range exists
     if (!namedItem) {
@@ -153,12 +175,18 @@ function tryGetFromNamedRange(
 
     const value: CellValue | null | undefined = range.getValue();
     const parsed: RetentionResult = parseRetention(value);
+    diag(workbook, [
+      `Named '${rangeName}' raw='${String(value)}', parsed=${parsed.retention} (${parsed.status})`
+    ]);
 
     return {
       ...parsed,
       source: `NamedRange:${rangeName}`
     };
   } catch (error) {
+    diag(workbook, [
+      `Error accessing named range '${rangeName}': ${String(error)}`
+    ]);
     // Named range not found or error accessing it
     return null;
   }
@@ -175,7 +203,7 @@ function tryGetFromNamedRange(
  * @returns RetentionResult if found, null otherwise
  */
 function tryGetFromTable(
-  workbook: Workbook,
+  workbook: ExcelScript.Workbook,
   tableName: string,
   metricCol: string,
   valueCol: string,
@@ -183,7 +211,12 @@ function tryGetFromTable(
 ): RetentionResult | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const table: any = workbook.getTable(tableName);
+    const wb: any = workbook as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const table: any = wb.getTable(tableName);
+    diag(workbook, [
+      table ? `Table '${tableName}' found` : `Table '${tableName}' NOT found`
+    ]);
     
     // Check if table exists
     if (!table) {
@@ -193,6 +226,9 @@ function tryGetFromTable(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const headerRange: any = table.getHeaderRowRange();
     if (!headerRange) {
+      diag(workbook, [
+        `Header row missing in table '${tableName}'`
+      ]);
       return {
         retention: null,
         status: "invalid",
@@ -204,6 +240,9 @@ function tryGetFromTable(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const headerValues: any[][] = headerRange.getValues();
     if (!headerValues || headerValues.length === 0) {
+      diag(workbook, [
+        `Header row empty in table '${tableName}'`
+      ]);
       return {
         retention: null,
         status: "invalid",
@@ -213,10 +252,16 @@ function tryGetFromTable(
     }
 
     const headers: string[] = headerValues[0].map((h: unknown) => String(h ?? "").trim());
+    diag(workbook, [
+      `Headers: [${headers.join(", ")}]`
+    ]);
 
     // Find column indices
     const metricIdx: number = headers.findIndex((h: string) => equalsLoose(h, metricCol));
     const valueIdx: number = headers.findIndex((h: string) => equalsLoose(h, valueCol));
+    diag(workbook, [
+      `metricIdx=${metricIdx}, valueIdx=${valueIdx}`
+    ]);
 
     if (metricIdx < 0 || valueIdx < 0) {
       return {
@@ -231,6 +276,9 @@ function tryGetFromTable(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const bodyRange: any = table.getDataBodyRange();
     if (!bodyRange) {
+      diag(workbook, [
+        `No data body range in table '${tableName}'`
+      ]);
       return {
         retention: null,
         status: "not_found",
@@ -241,6 +289,10 @@ function tryGetFromTable(
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rows: any[][] = bodyRange.getValues();
+    diag(workbook, [
+      `Row count: ${rows.length}`,
+      ...rows.slice(0, 5).map((r, i) => `r${i + 2}: metric='${String(r[metricIdx] ?? "").trim()}', value='${String(r[valueIdx] ?? "").trim()}'`)
+    ]);
     
     // Search for matching metric row
     for (let rowIndex: number = 0; rowIndex < rows.length; rowIndex++) {
@@ -249,6 +301,9 @@ function tryGetFromTable(
       if (equalsLoose(metricValue, metricMatch)) {
         const cellValue: CellValue | null | undefined = rows[rowIndex][valueIdx];
         const parsed: RetentionResult = parseRetention(cellValue);
+        diag(workbook, [
+          `Match at row ${rowIndex + 2}: '${metricMatch}', valueRaw='${cellValue}', parsed=${parsed.retention} (${parsed.status})`
+        ]);
         
         return {
           ...parsed,
@@ -265,6 +320,9 @@ function tryGetFromTable(
       message: `No row found where '${metricCol}' equals '${metricMatch}' (case-insensitive).`
     };
   } catch (error) {
+    diag(workbook, [
+      `Error accessing table '${tableName}': ${String(error)}`
+    ]);
     // Table not found or error accessing it
     return null;
   }
@@ -279,13 +337,15 @@ function tryGetFromTable(
  * @returns RetentionResult if found, null otherwise
  */
 function tryGetFromCell(
-  workbook: Workbook,
+  workbook: ExcelScript.Workbook,
   sheetName: string,
   address: string
 ): RetentionResult | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const worksheet: any = workbook.getWorksheet(sheetName);
+    const wb: any = workbook as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const worksheet: any = wb.getWorksheet(sheetName);
     
     if (!worksheet) {
       return null;
@@ -305,6 +365,9 @@ function tryGetFromCell(
       source: `Cell:${sheetName}!${address}`
     };
   } catch (error) {
+    diag(workbook, [
+      `Error accessing cell ${sheetName}!${address}: ${String(error)}`
+    ]);
     // Sheet or cell not found
     return null;
   }
@@ -430,7 +493,7 @@ function validateAndNormalize(
  * @returns Finalized RetentionResult with timestamp
  */
 function finalize(
-  workbook: Workbook,
+  workbook: ExcelScript.Workbook,
   result: RetentionResult
 ): RetentionResult {
   // Add ISO 8601 timestamp
@@ -446,7 +509,8 @@ function finalize(
   if (ENABLE_LOGGING && finalResult.retention !== null) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const logSheet: any = workbook.getWorksheet(LOG_SHEET);
+      const wb: any = workbook as any;
+      const logSheet: any = wb.getWorksheet(LOG_SHEET);
       
       if (logSheet) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -477,4 +541,34 @@ function finalize(
  */
 function equalsLoose(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+// ========== DIAGNOSTICS HELPER ==========
+function diag(workbook: ExcelScript.Workbook, lines: string[]): void {
+  if (!ENABLE_DIAGNOSTICS || !lines || lines.length === 0) return;
+  // Log to console (visible in Office Scripts runner)
+  try {
+    for (const line of lines) {
+      // eslint-disable-next-line no-console
+      console.log(line);
+    }
+  } catch {
+    // ignore console errors
+  }
+  if (!DIAG_WRITE_TO_SHEET) return;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const wb: any = workbook as any;
+    const ws = wb.getWorksheet(DIAG_SHEET);
+    if (!ws) return;
+    // Write sequentially starting at DIAG_START_CELL column
+    const startRow = Number(DIAG_START_CELL.replace(/[^0-9]/g, "")) || 2;
+    const colLetter = DIAG_START_CELL.replace(/[0-9]/g, "") || "E";
+    for (let i = 0; i < lines.length; i++) {
+      const addr = `${colLetter}${startRow + i}`;
+      ws.getRange(addr).setValue(lines[i]);
+    }
+  } catch {
+    // ignore sheet write errors
+  }
 }
