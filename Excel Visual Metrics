@@ -1,211 +1,460 @@
 /**
- * Office Script — Customer Retention fetcher (Option 2)
+ * Office Script — Customer Retention Fetcher (v2.0)
  * Returns retention as a number (0–100) + metadata, ideal for Power Automate.
  *
  * Supported sources (first match wins):
  *  1) Named range: RetentionPct
  *  2) Table: tblKPIs with columns Metric + Value (Metric row = "Customer Retention")
  *  3) Fallback cell: KPIs!B2
+ *
+ * @author Office Scripts
+ * @version 2.0.0
  */
 
+/** Retention fetch result type */
 type RetentionResult = {
-  retention: number | null;           // 0..100 (integer) or null if not found/invalid
+  /** Retention value from 0-100 (integer) or null if not found/invalid */
+  retention: number | null;
+  /** Status of the fetch operation */
   status: "ok" | "not_found" | "invalid";
+  /** Source location where the value was found */
   source: string;
+  /** Optional error or informational message */
   message?: string;
-  updatedAtLocal?: string;            // optional timestamp (written if you enable logging)
+  /** Optional timestamp of when the value was fetched (ISO 8601 format) */
+  updatedAtLocal?: string;
 };
 
-// ---- CONFIG (edit if you want) ----
-const NAMED_RANGE = "RetentionPct";
-const TABLE_NAME = "tblKPIs";
-const TABLE_COL_METRIC = "Metric";
-const TABLE_COL_VALUE = "Value";
-const TABLE_METRIC_MATCH = "Customer Retention";
-const FALLBACK_SHEET = "KPIs";
-const FALLBACK_CELL = "B2";
+/** Excel value type (compatible with Office Scripts) */
+type CellValue = string | number | boolean;
 
-// Optional logging: set to true to write a timestamp + last value somewhere
-const ENABLE_LOGGING = false;
-const LOG_SHEET = "KPIs";
-const LOG_CELL_VALUE = "D2"; // writes numeric retention
-const LOG_CELL_TIME = "D3";  // writes timestamp
+// ========== CONFIGURATION ==========
+/** Named range to check for retention value */
+const NAMED_RANGE = "RetentionPct" as const;
 
-export default function main(workbook: ExcelScript.Workbook): RetentionResult {
+/** Table name to search for retention metric */
+const TABLE_NAME = "MyKPITable" as const;
+
+/** Table column containing metric names */
+const TABLE_COL_METRIC = "Metric" as const;
+
+/** Table column containing metric values */
+const TABLE_COL_VALUE = "Value" as const;
+
+/** Metric name to match in table */
+const TABLE_METRIC_MATCH = "Customer Retention" as const;
+
+/** Fallback sheet name */
+const FALLBACK_SHEET = "KPIs" as const;
+
+/** Fallback cell address */
+const FALLBACK_CELL = "B2" as const;
+
+/** Enable logging to worksheet */
+const ENABLE_LOGGING = false as const;
+
+/** Sheet for logging (if enabled) */
+const LOG_SHEET = "KPIs" as const;
+
+/** Cell to log retention value */
+const LOG_CELL_VALUE = "D2" as const;
+
+/** Cell to log timestamp */
+const LOG_CELL_TIME = "D3" as const;
+
+// ========== MAIN FUNCTION ==========
+
+/**
+ * Main entry point for the Office Script.
+ * Attempts to fetch customer retention from multiple sources in priority order.
+ *
+ * @param workbook - The Excel workbook object
+ * @returns RetentionResult object with retention value and metadata
+ */
+function main(workbook: any): RetentionResult {
+  // Validate workbook parameter
+  if (!workbook) {
+    return {
+      retention: null,
+      status: "invalid",
+      source: "none",
+      message: "Invalid workbook object provided."
+    };
+  }
+
   // 1) Try named range
   const fromNamed = tryGetFromNamedRange(workbook, NAMED_RANGE);
-  if (fromNamed) return finalize(workbook, fromNamed);
+  if (fromNamed) {
+    return finalize(workbook, fromNamed);
+  }
 
   // 2) Try table lookup
-  const fromTable = tryGetFromTable(workbook, TABLE_NAME, TABLE_COL_METRIC, TABLE_COL_VALUE, TABLE_METRIC_MATCH);
-  if (fromTable) return finalize(workbook, fromTable);
+  const fromTable = tryGetFromTable(
+    workbook,
+    TABLE_NAME,
+    TABLE_COL_METRIC,
+    TABLE_COL_VALUE,
+    TABLE_METRIC_MATCH
+  );
+  if (fromTable) {
+    return finalize(workbook, fromTable);
+  }
 
   // 3) Fallback cell
   const fromCell = tryGetFromCell(workbook, FALLBACK_SHEET, FALLBACK_CELL);
-  if (fromCell) return finalize(workbook, fromCell);
+  if (fromCell) {
+    return finalize(workbook, fromCell);
+  }
 
+  // Nothing found
   return {
     retention: null,
     status: "not_found",
     source: "none",
-    message: `Couldn't find retention value in named range '${NAMED_RANGE}', table '${TABLE_NAME}', or ${FALLBACK_SHEET}!${FALLBACK_CELL}.`
+    message: `Retention value not found. Checked: Named range '${NAMED_RANGE}', Table '${TABLE_NAME}', and Cell ${FALLBACK_SHEET}!${FALLBACK_CELL}.`
   };
 }
 
-// ---------- Helpers ----------
+// ========== HELPER FUNCTIONS ==========
 
-function tryGetFromNamedRange(workbook: ExcelScript.Workbook, rangeName: string): RetentionResult | null {
+/**
+ * Attempts to retrieve retention from a named range.
+ *
+ * @param workbook - The Excel workbook
+ * @param rangeName - Name of the range to check
+ * @returns RetentionResult if found, null otherwise
+ */
+function tryGetFromNamedRange(
+  workbook: any,
+  rangeName: string
+): RetentionResult | null {
   try {
-    const named = workbook.getNamedItem(rangeName);
-    const rng = named.getRange();
-    const v = rng.getValue();
-    const parsed = parseRetention(v);
-
-    if (parsed.status === "ok") {
-      return { ...parsed, source: `NamedRange:${rangeName}` };
+    const namedItem = workbook.getNamedItem(rangeName);
+    
+    // Check if named range exists
+    if (!namedItem) {
+      return null;
     }
-    return { ...parsed, source: `NamedRange:${rangeName}` };
-  } catch {
-    return null; // named range not found
+
+    const range = namedItem.getRange();
+    if (!range) {
+      return null;
+    }
+
+    const value = range.getValue();
+    const parsed = parseRetention(value);
+
+    return {
+      ...parsed,
+      source: `NamedRange:${rangeName}`
+    };
+  } catch (error) {
+    // Named range not found or error accessing it
+    return null;
   }
 }
 
+/**
+ * Attempts to retrieve retention from a table by searching for a metric row.
+ *
+ * @param workbook - The Excel workbook
+ * @param tableName - Name of the table to search
+ * @param metricCol - Column name containing metric names
+ * @param valueCol - Column name containing metric values
+ * @param metricMatch - Metric name to search for
+ * @returns RetentionResult if found, null otherwise
+ */
 function tryGetFromTable(
-  workbook: ExcelScript.Workbook,
+  workbook: any,
   tableName: string,
   metricCol: string,
   valueCol: string,
   metricMatch: string
 ): RetentionResult | null {
-  let table: ExcelScript.Table;
   try {
-    table = workbook.getTable(tableName);
-  } catch {
-    return null; // table not found
-  }
+    const table = workbook.getTable(tableName);
+    
+    // Check if table exists
+    if (!table) {
+      return null;
+    }
 
-  const headerRange = table.getHeaderRowRange();
-  const headers = headerRange.getValues()[0].map(h => String(h).trim());
+    const headerRange = table.getHeaderRowRange();
+    if (!headerRange) {
+      return {
+        retention: null,
+        status: "invalid",
+        source: `Table:${tableName}`,
+        message: `Table '${tableName}' has no header row.`
+      };
+    }
 
-  const metricIdx = headers.findIndex(h => equalsLoose(h, metricCol));
-  const valueIdx = headers.findIndex(h => equalsLoose(h, valueCol));
-  if (metricIdx < 0 || valueIdx < 0) {
-    return {
-      retention: null,
-      status: "invalid",
-      source: `Table:${tableName}`,
-      message: `Table '${tableName}' must have columns '${metricCol}' and '${valueCol}'. Found: ${headers.join(", ")}`
-    };
-  }
+    const headerValues = headerRange.getValues();
+    if (!headerValues || headerValues.length === 0) {
+      return {
+        retention: null,
+        status: "invalid",
+        source: `Table:${tableName}`,
+        message: `Table '${tableName}' header row is empty.`
+      };
+    }
 
-  const body = table.getDataBodyRange();
-  if (!body) {
+    const headers = headerValues[0].map((h: any) => String(h ?? "").trim());
+
+    // Find column indices
+    const metricIdx = headers.findIndex((h: string) => equalsLoose(h, metricCol));
+    const valueIdx = headers.findIndex((h: string) => equalsLoose(h, valueCol));
+
+    if (metricIdx < 0 || valueIdx < 0) {
+      return {
+        retention: null,
+        status: "invalid",
+        source: `Table:${tableName}`,
+        message: `Table '${tableName}' must have columns '${metricCol}' and '${valueCol}'. Found: [${headers.join(", ")}]`
+      };
+    }
+
+    // Get table body
+    const bodyRange = table.getDataBodyRange();
+    if (!bodyRange) {
+      return {
+        retention: null,
+        status: "not_found",
+        source: `Table:${tableName}`,
+        message: `Table '${tableName}' has no data rows.`
+      };
+    }
+
+    const rows = bodyRange.getValues();
+    
+    // Search for matching metric row
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+      const metricValue = String(rows[rowIndex][metricIdx] ?? "").trim();
+      
+      if (equalsLoose(metricValue, metricMatch)) {
+        const cellValue = rows[rowIndex][valueIdx];
+        const parsed = parseRetention(cellValue);
+        
+        return {
+          ...parsed,
+          source: `Table:${tableName} (row ${rowIndex + 2}, Metric='${metricMatch}')`
+        };
+      }
+    }
+
+    // Metric not found in table
     return {
       retention: null,
       status: "not_found",
       source: `Table:${tableName}`,
-      message: `Table '${tableName}' has no rows.`
+      message: `No row found where '${metricCol}' equals '${metricMatch}' (case-insensitive).`
     };
-  }
-
-  const rows = body.getValues();
-  for (let r = 0; r < rows.length; r++) {
-    const metric = String(rows[r][metricIdx]).trim();
-    if (equalsLoose(metric, metricMatch)) {
-      const parsed = parseRetention(rows[r][valueIdx]);
-      return { ...parsed, source: `Table:${tableName} (Metric='${metricMatch}')` };
-    }
-  }
-
-  return {
-    retention: null,
-    status: "not_found",
-    source: `Table:${tableName}`,
-    message: `No row found where '${metricCol}' equals '${metricMatch}'.`
-  };
-}
-
-function tryGetFromCell(workbook: ExcelScript.Workbook, sheetName: string, address: string): RetentionResult | null {
-  try {
-    const ws = workbook.getWorksheet(sheetName);
-    const v = ws.getRange(address).getValue();
-    const parsed = parseRetention(v);
-    return { ...parsed, source: `Cell:${sheetName}!${address}` };
-  } catch {
-    return null; // sheet/cell not found
+  } catch (error) {
+    // Table not found or error accessing it
+    return null;
   }
 }
 
 /**
- * Accepts:
- *  - 93
- *  - 0.93 (interpreted as 93%)
- *  - "93%"
- *  - "93"
+ * Attempts to retrieve retention from a specific cell.
+ *
+ * @param workbook - The Excel workbook
+ * @param sheetName - Name of the worksheet
+ * @param address - Cell address (e.g., "B2")
+ * @returns RetentionResult if found, null otherwise
  */
-function parseRetention(value: ExcelScript.RangeValueType): RetentionResult {
-  if (value === null || value === undefined || value === "") {
-    return { retention: null, status: "invalid", source: "parse", message: "Retention value is blank." };
-  }
-
-  // If it's a string like "93%" or "93"
-  if (typeof value === "string") {
-    const s = value.trim();
-    const cleaned = s.endsWith("%") ? s.slice(0, -1).trim() : s;
-    const n = Number(cleaned);
-    if (!Number.isFinite(n)) {
-      return { retention: null, status: "invalid", source: "parse", message: `Retention value '${value}' is not numeric.` };
+function tryGetFromCell(
+  workbook: any,
+  sheetName: string,
+  address: string
+): RetentionResult | null {
+  try {
+    const worksheet = workbook.getWorksheet(sheetName);
+    
+    if (!worksheet) {
+      return null;
     }
-    return validateAndNormalize(n, `Parsed from string '${value}'`);
-  }
 
-  // If it's numeric
-  if (typeof value === "number") {
-    return validateAndNormalize(value, "Parsed from number");
-  }
+    const range = worksheet.getRange(address);
+    if (!range) {
+      return null;
+    }
 
-  // Booleans etc.
-  return { retention: null, status: "invalid", source: "parse", message: `Unsupported value type: ${typeof value}` };
+    const value = range.getValue();
+    const parsed = parseRetention(value);
+
+    return {
+      ...parsed,
+      source: `Cell:${sheetName}!${address}`
+    };
+  } catch (error) {
+    // Sheet or cell not found
+    return null;
+  }
 }
 
-function validateAndNormalize(n: number, msg: string): RetentionResult {
-  // If user stored as decimal (0.93), treat as 93
-  const normalized = (n > 0 && n <= 1) ? n * 100 : n;
-
-  if (!Number.isFinite(normalized)) {
-    return { retention: null, status: "invalid", source: "validate", message: "Value is not finite." };
+/**
+ * Parses a retention value from various formats.
+ * Accepts: 93, 0.93 (as 93%), "93%", "93"
+ *
+ * @param value - The cell value to parse
+ * @returns RetentionResult with parsed value or error
+ */
+function parseRetention(value: CellValue | null | undefined): RetentionResult {
+  // Handle null, undefined, or empty values
+  if (value === null || value === undefined || value === "") {
+    return {
+      retention: null,
+      status: "invalid",
+      source: "parse",
+      message: "Retention value is blank or empty."
+    };
   }
 
-  // Allow slight float weirdness
+  // Handle boolean values (not valid for retention)
+  if (typeof value === "boolean") {
+    return {
+      retention: null,
+      status: "invalid",
+      source: "parse",
+      message: `Boolean value '${value}' is not valid for retention.`
+    };
+  }
+
+  // Handle string values (e.g., "93%", "93", "0.93")
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    
+    // Handle percentage strings
+    const cleaned = trimmed.endsWith("%") 
+      ? trimmed.slice(0, -1).trim() 
+      : trimmed;
+
+    const numericValue = Number(cleaned);
+
+    if (!Number.isFinite(numericValue)) {
+      return {
+        retention: null,
+        status: "invalid",
+        source: "parse",
+        message: `String value '${value}' cannot be converted to a number.`
+      };
+    }
+
+    return validateAndNormalize(numericValue, `string '${value}'`);
+  }
+
+  // Handle numeric values
+  if (typeof value === "number") {
+    return validateAndNormalize(value, "number");
+  }
+
+  // Unsupported type
+  return {
+    retention: null,
+    status: "invalid",
+    source: "parse",
+    message: `Unsupported value type: ${typeof value}`
+  };
+}
+
+/**
+ * Validates and normalizes a numeric retention value to 0-100 range.
+ * Converts decimals (0.93) to percentages (93).
+ *
+ * @param numericValue - The numeric value to validate
+ * @param sourceDescription - Description of the source for error messages
+ * @returns RetentionResult with validated value or error
+ */
+function validateAndNormalize(
+  numericValue: number,
+  sourceDescription: string
+): RetentionResult {
+  // Check for non-finite values (NaN, Infinity)
+  if (!Number.isFinite(numericValue)) {
+    return {
+      retention: null,
+      status: "invalid",
+      source: "validate",
+      message: `Value from ${sourceDescription} is not a finite number.`
+    };
+  }
+
+  // Convert decimal to percentage (0.93 → 93)
+  const normalized = (numericValue > 0 && numericValue <= 1)
+    ? numericValue * 100
+    : numericValue;
+
+  // Round to nearest integer to handle floating-point precision
   const rounded = Math.round(normalized);
 
+  // Validate range (0-100)
   if (rounded < 0 || rounded > 100) {
-    return { retention: null, status: "invalid", source: "validate", message: `${msg}. Value ${normalized} out of range (0–100).` };
+    return {
+      retention: null,
+      status: "invalid",
+      source: "validate",
+      message: `Value ${normalized} from ${sourceDescription} is out of valid range (0-100).`
+    };
   }
 
-  return { retention: rounded, status: "ok", source: "validate" };
+  return {
+    retention: rounded,
+    status: "ok",
+    source: "validate"
+  };
 }
 
-function finalize(workbook: ExcelScript.Workbook, result: RetentionResult): RetentionResult {
-  // Add local timestamp (Excel will store as string)
+/**
+ * Finalizes the result by adding timestamp and optionally logging to worksheet.
+ *
+ * @param workbook - The Excel workbook
+ * @param result - The retention result to finalize
+ * @returns Finalized RetentionResult with timestamp
+ */
+function finalize(
+  workbook: any,
+  result: RetentionResult
+): RetentionResult {
+  // Add ISO 8601 timestamp
   const now = new Date();
-  const updatedAtLocal = now.toLocaleString();
+  const updatedAtLocal = now.toISOString();
 
-  const out: RetentionResult = { ...result, updatedAtLocal };
+  const finalResult: RetentionResult = {
+    ...result,
+    updatedAtLocal
+  };
 
-  if (ENABLE_LOGGING && out.retention !== null) {
+  // Optional logging to worksheet
+  if (ENABLE_LOGGING && finalResult.retention !== null) {
     try {
-      const ws = workbook.getWorksheet(LOG_SHEET);
-      ws.getRange(LOG_CELL_VALUE).setValue(out.retention);
-      ws.getRange(LOG_CELL_TIME).setValue(updatedAtLocal);
-    } catch {
-      // ignore logging failures
+      const logSheet = workbook.getWorksheet(LOG_SHEET);
+      
+      if (logSheet) {
+        const valueRange = logSheet.getRange(LOG_CELL_VALUE);
+        const timeRange = logSheet.getRange(LOG_CELL_TIME);
+        
+        if (valueRange && timeRange) {
+          valueRange.setValue(finalResult.retention);
+          timeRange.setValue(updatedAtLocal);
+        }
+      }
+    } catch (error) {
+      // Silently ignore logging failures
+      // Don't disrupt the main workflow if logging fails
     }
   }
 
-  return out;
+  return finalResult;
 }
 
+/**
+ * Case-insensitive string comparison with trimming.
+ *
+ * @param a - First string to compare
+ * @param b - Second string to compare
+ * @returns True if strings are equal (case-insensitive), false otherwise
+ */
 function equalsLoose(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase();
 }
