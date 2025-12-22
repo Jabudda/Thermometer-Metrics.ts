@@ -1,5 +1,5 @@
 /**
- * Office Script — Customer Retention Fetcher (v3.0)
+ * Office Script — Customer Retention Fetcher (v2.0)
  * Returns retention as a number (0–100) + metadata, ideal for Power Automate.
  *
  * Supported sources (first match wins):
