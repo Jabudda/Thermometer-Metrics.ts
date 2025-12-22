@@ -1,5 +1,5 @@
 /**
- * Office Script — Customer Retention Fetcher (v2.0)
+ * Office Script — Customer Retention Fetcher (v5.0)
  * Returns retention as a number (0–100) + metadata, ideal for Power Automate.
  *
  * Supported sources (first match wins):
@@ -27,6 +27,13 @@ type RetentionResult = {
 
 /** Excel value type (compatible with Office Scripts) */
 type CellValue = string | number | boolean;
+
+/**
+ * Workbook type alias for Office Scripts
+ * Note: ExcelScript namespace is only available at runtime in Excel,
+ * not during TypeScript compilation
+ */
+type Workbook = any;
 
 // ========== CONFIGURATION ==========
 /** Named range to check for retention value */
@@ -71,7 +78,7 @@ const LOG_CELL_TIME = "D3" as const;
  * @param workbook - The Excel workbook object
  * @returns RetentionResult object with retention value and metadata
  */
-function main(workbook: any): RetentionResult {
+function main(workbook: Workbook): RetentionResult {
   // Validate workbook parameter
   if (!workbook) {
     return {
@@ -125,7 +132,7 @@ function main(workbook: any): RetentionResult {
  * @returns RetentionResult if found, null otherwise
  */
 function tryGetFromNamedRange(
-  workbook: any,
+  workbook: Workbook,
   rangeName: string
 ): RetentionResult | null {
   try {
@@ -165,7 +172,7 @@ function tryGetFromNamedRange(
  * @returns RetentionResult if found, null otherwise
  */
 function tryGetFromTable(
-  workbook: any,
+  workbook: Workbook,
   tableName: string,
   metricCol: string,
   valueCol: string,
@@ -264,7 +271,7 @@ function tryGetFromTable(
  * @returns RetentionResult if found, null otherwise
  */
 function tryGetFromCell(
-  workbook: any,
+  workbook: Workbook,
   sheetName: string,
   address: string
 ): RetentionResult | null {
@@ -413,7 +420,7 @@ function validateAndNormalize(
  * @returns Finalized RetentionResult with timestamp
  */
 function finalize(
-  workbook: any,
+  workbook: Workbook,
   result: RetentionResult
 ): RetentionResult {
   // Add ISO 8601 timestamp
