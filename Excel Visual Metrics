@@ -52,12 +52,14 @@ interface OSTable {
 }
 interface OSWorksheet {
   getRange(address: string): OSRange | null;
+  activate(): void;
 }
 interface OSWorkbook {
   getNamedItem(name: string): OSNamedItem | null;
   getTable(name: string): OSTable | null;
   getWorksheet(name: string): OSWorksheet | null;
   addWorksheet(name: string): OSWorksheet;
+  getActiveWorksheet(): OSWorksheet;
 }
 
 // ========== CONFIGURATION ==========
@@ -586,8 +588,17 @@ function finalize(
       const wb = workbook as unknown as OSWorkbook;
       let logSheet = wb.getWorksheet(LOG_SHEET);
       if (!logSheet) {
-        logSheet = wb.addWorksheet(LOG_SHEET);
+        try { logSheet = wb.addWorksheet(LOG_SHEET); } catch {}
       }
+      if (!logSheet) {
+        try { logSheet = wb.getActiveWorksheet(); } catch {}
+      }
+      if (!logSheet) {
+        diag(workbook, ["Logging target sheet unavailable; skipping write."]);
+        return finalResult;
+      }
+      // Try to bring the sheet to the foreground for visibility
+      try { logSheet.activate(); } catch {}
 
       const valueRange = logSheet.getRange(LOG_CELL_VALUE);
       const timeRange = logSheet.getRange(LOG_CELL_TIME);
@@ -600,6 +611,10 @@ function finalize(
         const sourceText = finalResult.source ? ` — source=${finalResult.source}` : "";
         timeRange.setValue(`${updatedAtLocal} — Created by Andrew Jafuta — ${statusText}${sourceText}${msgText}`);
       }
+      // Confirmation diagnostics
+      diag(workbook, [
+        `Logged output to '${LOG_SHEET}' (or active sheet) at D2/D3/D4`
+      ]);
     } catch (error) {
       // Silently ignore logging failures
       // Don't disrupt the main workflow if logging fails
@@ -637,8 +652,15 @@ function diag(workbook: ExcelScript.Workbook, lines: string[]): void {
     const wb = workbook as unknown as OSWorkbook;
     let ws = wb.getWorksheet(DIAG_SHEET);
     if (!ws) {
-      ws = wb.addWorksheet(DIAG_SHEET);
+      try { ws = wb.addWorksheet(DIAG_SHEET); } catch {}
     }
+    if (!ws) {
+      try { ws = wb.getActiveWorksheet(); } catch {}
+    }
+    if (!ws) {
+      return;
+    }
+    try { ws.activate(); } catch {}
     // Write sequentially starting at DIAG_START_CELL column
     const startRow = Number(DIAG_START_CELL.replace(/[^0-9]/g, "")) || 2;
     const colLetter = DIAG_START_CELL.replace(/[0-9]/g, "") || "E";
