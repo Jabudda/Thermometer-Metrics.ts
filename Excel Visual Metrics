@@ -117,6 +117,9 @@ const DIAG_START_CELL = "E2" as const;
  * @returns RetentionResult object with retention value and metadata
  */
 function main(workbook: ExcelScript.Workbook): RetentionResult {
+  diag(workbook, [
+    `Script started: logging=${ENABLE_LOGGING ? "on" : "off"}, logSheet='${LOG_SHEET}', diagSheet='${DIAG_SHEET}'`
+  ]);
   // Validate workbook parameter
   if (!workbook) {
     return {
@@ -163,13 +166,13 @@ function main(workbook: ExcelScript.Workbook): RetentionResult {
     return finalize(workbook, fromCell);
   }
 
-  // Nothing found
-  return {
+  // Nothing found — finalize to ensure logging still occurs
+  return finalize(workbook, {
     retention: null,
     status: "not_found",
     source: "none",
     message: `Retention value not found. Checked: Named range '${NAMED_RANGE}', Table '${TABLE_NAME}', and Cell ${FALLBACK_SHEET}!${FALLBACK_CELL}.`
-  };
+  });
 }
 
 // ========== HELPER FUNCTIONS ==========
