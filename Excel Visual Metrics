@@ -263,64 +263,65 @@ function tryGetFromTable(
     }
 
     let headerRange: OSRange | null = null;
+    let fallbackNoHeader = false;
     try {
       headerRange = table.getHeaderRowRange();
     } catch (e) {
       diag(workbook, [
         `Table '${tableName}' getHeaderRowRange() threw: ${String((e as Error).message || e)}`,
-        `Tip: Ensure '${tableName}' is an Excel Table (Insert > Table) with a header row.`
+        `Tip: Ensure '${tableName}' is an Excel Table (Insert > Table) with a header row.`,
+        `Fallback: proceeding without headers; using first two columns as Metric/Value.`
       ]);
-      return {
-        retention: null,
-        status: "invalid",
-        source: `Table:${tableName}`,
-        message: `Cannot access header row. Verify '${tableName}' is a proper Excel Table with headers.`
-      };
+      fallbackNoHeader = true;
     }
     if (!headerRange) {
       diag(workbook, [
-        `Header row missing in table '${tableName}'`
+        `Header row missing in table '${tableName}'`,
+        `Fallback: proceeding without headers; using first two columns as Metric/Value.`
       ]);
-      return {
-        retention: null,
-        status: "invalid",
-        source: `Table:${tableName}`,
-        message: `Table '${tableName}' has no header row.`
-      };
+      fallbackNoHeader = true;
     }
 
-    const headerValues: unknown[][] = headerRange.getValues();
-    if (!headerValues || headerValues.length === 0) {
-      diag(workbook, [
-        `Header row empty in table '${tableName}'`
-      ]);
-      return {
-        retention: null,
-        status: "invalid",
-        source: `Table:${tableName}`,
-        message: `Table '${tableName}' header row is empty.`
-      };
+    let headers: string[] = [];
+    if (!fallbackNoHeader && headerRange) {
+      const headerValues: unknown[][] = headerRange.getValues();
+      if (!headerValues || headerValues.length === 0) {
+        diag(workbook, [
+          `Header row empty in table '${tableName}'`,
+          `Fallback: proceeding without headers; using first two columns as Metric/Value.`
+        ]);
+        fallbackNoHeader = true;
+      } else {
+        headers = headerValues[0].map((h: unknown) => String(h ?? "").trim());
+        diag(workbook, [
+          `Headers: [${headers.join(", ")}]`
+        ]);
+      }
     }
-
-    const headers: string[] = headerValues[0].map((h: unknown) => String(h ?? "").trim());
-    diag(workbook, [
-      `Headers: [${headers.join(", ")}]`
-    ]);
 
     // Find column indices
-    const metricIdx: number = headers.findIndex((h: string) => equalsLoose(h, metricCol));
-    const valueIdx: number = headers.findIndex((h: string) => equalsLoose(h, valueCol));
-    diag(workbook, [
-      `metricIdx=${metricIdx}, valueIdx=${valueIdx}`
-    ]);
-
-    if (metricIdx < 0 || valueIdx < 0) {
-      return {
-        retention: null,
-        status: "invalid",
-        source: `Table:${tableName}`,
-        message: `Table '${tableName}' must have columns '${metricCol}' and '${valueCol}'. Found: [${headers.join(", ")}]`
-      };
+    let metricIdx: number;
+    let valueIdx: number;
+    if (fallbackNoHeader) {
+      metricIdx = 0;
+      valueIdx = 1;
+      diag(workbook, [
+        `No headers accessible. Using fallback indices metricIdx=0, valueIdx=1.`
+      ]);
+    } else {
+      metricIdx = headers.findIndex((h: string) => equalsLoose(h, metricCol));
+      valueIdx = headers.findIndex((h: string) => equalsLoose(h, valueCol));
+      diag(workbook, [
+        `metricIdx=${metricIdx}, valueIdx=${valueIdx}`
+      ]);
+      if (metricIdx < 0 || valueIdx < 0) {
+        return {
+          retention: null,
+          status: "invalid",
+          source: `Table:${tableName}`,
+          message: `Table '${tableName}' must have columns '${metricCol}' and '${valueCol}'. Found: [${headers.join(", ")}]`
+        };
+      }
     }
 
     // Get table body
@@ -352,6 +353,19 @@ function tryGetFromTable(
     }
 
     const rows: unknown[][] = bodyRange.getValues();
+    if (fallbackNoHeader) {
+      // Ensure rows have at least two columns for fallback
+      const colCounts = rows.map(r => r.length);
+      const maxCols = Math.max(0, ...colCounts);
+      if (maxCols < 2) {
+        return {
+          retention: null,
+          status: "invalid",
+          source: `Table:${tableName}`,
+          message: `Fallback failed: table '${tableName}' must have at least two columns to infer Metric/Value.`
+        };
+      }
+    }
     diag(workbook, [
       `Row count: ${rows.length}`,
       ...rows.slice(0, 5).map((r, i) => `r${i + 2}: metric='${String(r[metricIdx] ?? "").trim()}', value='${String(r[valueIdx] ?? "").trim()}'`)
