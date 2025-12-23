@@ -53,6 +53,7 @@ interface OSTable {
 interface OSWorksheet {
   getRange(address: string): OSRange | null;
   activate(): void;
+  getName(): string;
 }
 interface OSWorkbook {
   getNamedItem(name: string): OSNamedItem | null;
@@ -89,6 +90,8 @@ const ENABLE_LOGGING = true as const;
 
 /** Sheet for logging (if enabled) */
 const LOG_SHEET = "Where We Are" as const;
+/** Log to the active sheet only (ignores LOG_SHEET) */
+const LOG_TO_ACTIVE_SHEET_ONLY = true as const;
 
 /** Cell to log retention value */
 const LOG_CELL_VALUE = "D2" as const;
@@ -589,12 +592,17 @@ function finalize(
   if (ENABLE_LOGGING) {
     try {
       const wb = workbook as unknown as OSWorkbook;
-      let logSheet = wb.getWorksheet(LOG_SHEET);
-      if (!logSheet) {
-        try { logSheet = wb.addWorksheet(LOG_SHEET); } catch {}
-      }
-      if (!logSheet) {
+      let logSheet: OSWorksheet | null = null;
+      if (LOG_TO_ACTIVE_SHEET_ONLY) {
         try { logSheet = wb.getActiveWorksheet(); } catch {}
+      } else {
+        logSheet = wb.getWorksheet(LOG_SHEET);
+        if (!logSheet) {
+          try { logSheet = wb.addWorksheet(LOG_SHEET); } catch {}
+        }
+        if (!logSheet) {
+          try { logSheet = wb.getActiveWorksheet(); } catch {}
+        }
       }
       if (!logSheet) {
         diag(workbook, ["Logging target sheet unavailable; skipping write."]);
@@ -616,7 +624,7 @@ function finalize(
       }
       // Confirmation diagnostics
       diag(workbook, [
-        `Logged output to '${LOG_SHEET}' (or active sheet) at D2/D3/D4`
+        `Logged output to sheet '${(() => { try { return logSheet.getName(); } catch { return LOG_TO_ACTIVE_SHEET_ONLY ? "(active)" : LOG_SHEET; } })()}' at D2/D3/D4`
       ]);
     } catch (error) {
       // Silently ignore logging failures
