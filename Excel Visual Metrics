@@ -4,7 +4,7 @@
  *
  * Supported sources (first match wins):
  *  1) Named range: RetentionPct
- *  2) Table: tblKPIs with columns Metric + Value (Metric row = "Customer Retention")
+ *  2) Table: MyKPITable with columns Metric + Value (Metric row = "Customer Retention")
  *  3) Fallback cell: KPIs!B2
  *
  * @author Office Scripts
@@ -23,6 +23,8 @@ type RetentionResult = {
   message?: string;
   /** Optional timestamp of when the value was fetched (ISO 8601 format) */
   updatedAtLocal?: string;
+  /** Optional percent string (exact, unrounded) like "93.2%" */
+  percentText?: string;
 };
 
 /** Excel value type (compatible with Office Scripts) */
@@ -91,6 +93,8 @@ const LOG_CELL_VALUE = "D2" as const;
 
 /** Cell to log timestamp */
 const LOG_CELL_TIME = "D3" as const;
+/** Cell to log percent text */
+const LOG_CELL_PERCENT = "D4" as const;
 
 // ========== DIAGNOSTICS CONFIG ==========
 /** Enable lightweight diagnostics (console logging) */
@@ -518,7 +522,7 @@ function validateAndNormalize(
     };
   }
 
-  // Convert decimal to percentage (0.93 → 93)
+  // Convert decimal to percentage (0.93 → 93). Keep exact normalized for percent string
   const normalized: number = (numericValue > 0 && numericValue <= 1)
     ? numericValue * 100
     : numericValue;
@@ -539,8 +543,21 @@ function validateAndNormalize(
   return {
     retention: rounded,
     status: "ok",
-    source: "validate"
+    source: "validate",
+    percentText: formatPercent(normalized)
   };
+}
+
+/** Formats a number as a percent string without unnecessary rounding */
+function formatPercent(value: number): string {
+  // Treat near-integers as integers to avoid 92.999999 artifacts
+  const epsilon = 1e-6;
+  if (Math.abs(value - Math.round(value)) < epsilon) {
+    return `${Math.round(value)}%`;
+  }
+  // Show up to 2 decimal places for readability
+  const formatted = Math.round(value * 100) / 100; // two decimals
+  return `${formatted}%`;
 }
 
 /**
@@ -563,8 +580,8 @@ function finalize(
     updatedAtLocal
   };
 
-  // Optional logging to worksheet
-  if (ENABLE_LOGGING && finalResult.retention !== null) {
+  // Optional logging to worksheet (always write a status line)
+  if (ENABLE_LOGGING) {
     try {
       const wb = workbook as unknown as OSWorkbook;
       let logSheet = wb.getWorksheet(LOG_SHEET);
@@ -574,8 +591,15 @@ function finalize(
 
       const valueRange = logSheet.getRange(LOG_CELL_VALUE);
       const timeRange = logSheet.getRange(LOG_CELL_TIME);
-      if (valueRange) valueRange.setValue(finalResult.retention);
-      if (timeRange) timeRange.setValue(`${updatedAtLocal} — Created by Andrew Jafuta`);
+      const percentRange = logSheet.getRange(LOG_CELL_PERCENT);
+      if (valueRange) valueRange.setValue(finalResult.retention ?? "N/A");
+      if (percentRange) percentRange.setValue(finalResult.percentText ?? "N/A");
+      if (timeRange) {
+        const statusText = `status=${finalResult.status}`;
+        const msgText = finalResult.message ? ` — ${finalResult.message}` : "";
+        const sourceText = finalResult.source ? ` — source=${finalResult.source}` : "";
+        timeRange.setValue(`${updatedAtLocal} — Created by Andrew Jafuta — ${statusText}${sourceText}${msgText}`);
+      }
     } catch (error) {
       // Silently ignore logging failures
       // Don't disrupt the main workflow if logging fails
