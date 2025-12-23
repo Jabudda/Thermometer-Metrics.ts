@@ -58,14 +58,6 @@ interface OSWorkbook {
   addWorksheet(name: string): OSWorksheet;
 }
 
-function hasMethod(obj: unknown, name: string): boolean {
-  try {
-    return !!obj && typeof (obj as Record<string, unknown>)[name] === "function";
-  } catch {
-    return false;
-  }
-}
-
 // ========== CONFIGURATION ==========
 /** Named range to check for retention value */
 const NAMED_RANGE = "RetentionPct" as const;
@@ -196,13 +188,16 @@ function tryGetFromNamedRange(
       return null;
     }
 
-    if (!hasMethod(namedItem, "getRange")) {
+    let range: OSRange | null = null;
+    try {
+      range = namedItem.getRange();
+    } catch (e) {
       diag(workbook, [
-        `Named item '${rangeName}' exists but getRange() is unavailable. Ensure it refers to a range.`
+        `Named item '${rangeName}' getRange() threw: ${String((e as Error).message || e)}`,
+        `Tip: Ensure '${rangeName}' refers to a cell/range reference, not only a formula.`
       ]);
       return null;
     }
-    const range = namedItem.getRange();
     if (!range) {
       return null;
     }
@@ -255,18 +250,21 @@ function tryGetFromTable(
       return null;
     }
 
-    if (!hasMethod(table, "getHeaderRowRange")) {
+    let headerRange: OSRange | null = null;
+    try {
+      headerRange = table.getHeaderRowRange();
+    } catch (e) {
       diag(workbook, [
-        `Table '${tableName}' object lacks getHeaderRowRange().`
+        `Table '${tableName}' getHeaderRowRange() threw: ${String((e as Error).message || e)}`,
+        `Tip: Ensure '${tableName}' is an Excel Table (Insert > Table) with a header row.`
       ]);
       return {
         retention: null,
         status: "invalid",
         source: `Table:${tableName}`,
-        message: `Table '${tableName}' does not expose header row access.`
+        message: `Cannot access header row. Verify '${tableName}' is a proper Excel Table with headers.`
       };
     }
-    const headerRange = table.getHeaderRowRange();
     if (!headerRange) {
       diag(workbook, [
         `Header row missing in table '${tableName}'`
@@ -314,18 +312,21 @@ function tryGetFromTable(
     }
 
     // Get table body
-    if (!hasMethod(table, "getDataBodyRange")) {
+    let bodyRange: OSRange | null = null;
+    try {
+      bodyRange = table.getDataBodyRange();
+    } catch (e) {
       diag(workbook, [
-        `Table '${tableName}' object lacks getDataBodyRange().`
+        `Table '${tableName}' getDataBodyRange() threw: ${String((e as Error).message || e)}`,
+        `Tip: Ensure '${tableName}' is an Excel Table with data rows.`
       ]);
       return {
         retention: null,
         status: "invalid",
         source: `Table:${tableName}`,
-        message: `Table '${tableName}' does not expose data body access.`
+        message: `Cannot access table rows. Verify '${tableName}' contains data rows.`
       };
     }
-    const bodyRange = table.getDataBodyRange();
     if (!bodyRange) {
       diag(workbook, [
         `No data body range in table '${tableName}'`
@@ -399,13 +400,16 @@ function tryGetFromCell(
       return null;
     }
 
-    if (!hasMethod(worksheet, "getRange")) {
+    let range: OSRange | null = null;
+    try {
+      range = worksheet.getRange(address);
+    } catch (e) {
       diag(workbook, [
-        `Worksheet '${sheetName}' lacks getRange(address).`
+        `Worksheet '${sheetName}' getRange('${address}') threw: ${String((e as Error).message || e)}`,
+        `Tip: Confirm sheet '${sheetName}' exists and address '${address}' is valid.`
       ]);
       return null;
     }
-    const range = worksheet.getRange(address);
     if (!range) {
       return null;
     }
