@@ -58,6 +58,14 @@ interface OSWorkbook {
   addWorksheet(name: string): OSWorksheet;
 }
 
+function hasMethod(obj: unknown, name: string): boolean {
+  try {
+    return !!obj && typeof (obj as Record<string, unknown>)[name] === "function";
+  } catch {
+    return false;
+  }
+}
+
 // ========== CONFIGURATION ==========
 /** Named range to check for retention value */
 const NAMED_RANGE = "RetentionPct" as const;
@@ -188,6 +196,12 @@ function tryGetFromNamedRange(
       return null;
     }
 
+    if (!hasMethod(namedItem, "getRange")) {
+      diag(workbook, [
+        `Named item '${rangeName}' exists but getRange() is unavailable. Ensure it refers to a range.`
+      ]);
+      return null;
+    }
     const range = namedItem.getRange();
     if (!range) {
       return null;
@@ -241,6 +255,17 @@ function tryGetFromTable(
       return null;
     }
 
+    if (!hasMethod(table, "getHeaderRowRange")) {
+      diag(workbook, [
+        `Table '${tableName}' object lacks getHeaderRowRange().`
+      ]);
+      return {
+        retention: null,
+        status: "invalid",
+        source: `Table:${tableName}`,
+        message: `Table '${tableName}' does not expose header row access.`
+      };
+    }
     const headerRange = table.getHeaderRowRange();
     if (!headerRange) {
       diag(workbook, [
@@ -289,6 +314,17 @@ function tryGetFromTable(
     }
 
     // Get table body
+    if (!hasMethod(table, "getDataBodyRange")) {
+      diag(workbook, [
+        `Table '${tableName}' object lacks getDataBodyRange().`
+      ]);
+      return {
+        retention: null,
+        status: "invalid",
+        source: `Table:${tableName}`,
+        message: `Table '${tableName}' does not expose data body access.`
+      };
+    }
     const bodyRange = table.getDataBodyRange();
     if (!bodyRange) {
       diag(workbook, [
@@ -363,6 +399,12 @@ function tryGetFromCell(
       return null;
     }
 
+    if (!hasMethod(worksheet, "getRange")) {
+      diag(workbook, [
+        `Worksheet '${sheetName}' lacks getRange(address).`
+      ]);
+      return null;
+    }
     const range = worksheet.getRange(address);
     if (!range) {
       return null;
@@ -376,8 +418,9 @@ function tryGetFromCell(
       source: `Cell:${sheetName}!${address}`
     };
   } catch (error) {
+    const e = error as { name?: string; message?: string };
     diag(workbook, [
-      `Error accessing cell ${sheetName}!${address}: ${String(error)}`
+      `Error accessing cell ${sheetName}!${address}: ${e?.name ?? "Error"} ${e?.message ?? String(error)}`
     ]);
     // Sheet or cell not found
     return null;
